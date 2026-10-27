@@ -18,7 +18,7 @@ results, err := search.New(db).Search(ctx,
     search.Query{Text: "postgres", Viewer: userID}, profiles, launches)
 ```
 
-## What it is, and is not
+## When to use it
 
 **Not an indexing engine.** An application that added generated `tsvector`
 columns and GIN indexes alongside the migrations that created the tables —
@@ -165,7 +165,7 @@ not a letter or a digit becomes a separator, and the expression is assembled
 from terms this package produced, each still **bound** as a parameter. The
 `:*` and the `&` are ours; the words are theirs.
 
-## Costs, and where they are
+## Performance
 
 **One statement per table, plus a count.** Not a `UNION ALL`: the ranks are
 not comparable so there is nothing to gain by merging in SQL, and a union of
@@ -198,14 +198,13 @@ page that says "no results for ???" is answering a question nobody asked.
 `Search` sets `Results.Empty` and runs **no queries at all** for such input,
 because eight index scans for an empty box is work nobody asked for.
 
-## Deliberate omissions
+## Limitations
 
 No synonyms, no spelling correction, no faceting, no aggregations, no
-incremental indexing, and no second engine. `Searcher` is an interface so a
-Meilisearch implementation can replace this one; the `Table` descriptors are
-Postgres-shaped, which is the honest seam — that implementation would take its
-own descriptors, and `Query`, `Hit`, `Group` and `Results` would carry over
-unchanged.
+incremental indexing, and no second engine. `Searcher` is an interface, so a
+Meilisearch implementation can replace this one. The `Table` descriptors are
+Postgres-shaped and such an implementation would take its own; `Query`, `Hit`,
+`Group` and `Results` carry over unchanged.
 
 ## Testing
 
