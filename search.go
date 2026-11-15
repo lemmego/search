@@ -1,11 +1,20 @@
-// Package search finds things in a Postgres database that already has
-// tsvector columns.
+// Package search is full-text search with a pluggable engine.
 //
-// It is deliberately not an indexing engine. An application that has added
-// generated tsvector columns and GIN indexes — which is the cheap thing to do
-// up front and an expensive retrofit later — already has an index; what it
-// lacks is a safe way to turn what somebody typed into a query against it,
-// and a shape for the answer. That is what this is.
+// Two layers, and the seam between them is the whole design.
+//
+// The **core** owns the shape of an answer: one Group per Source in the order
+// asked, an empty query answered without touching the engine, every snippet
+// escaped before it is marked up, the page size clamped once. An engine
+// cannot opt out of any of it, because an engine never builds a Group or a
+// Hit — it returns RawHits and the core turns them into results.
+//
+// An **engine** owns how documents are matched, and declares its own
+// descriptor for them. The Postgres engine here takes a Table of SQL
+// fragments and searches tsvector columns an application already has;
+// search/engine/meili takes an index name and a filter expression;
+// search/engine/memory keeps everything in this process. Query, Hit, Group
+// and Results carry over unchanged, which is what makes changing engine a
+// configuration change rather than a rewrite.
 //
 // Four things here are not conveniences.
 //
@@ -13,27 +22,33 @@
 // "a & | b", so a search box wired to it answers 500 for a string somebody
 // can type by accident. Everything in this package goes through
 // websearch_to_tsquery, which parses anything and is the only one of the four
-// conversion functions designed for untrusted input.
+// conversion functions designed for untrusted input. The conformance suite
+// holds every engine to the same rule.
 //
 // **A snippet is escaped before it is marked up.** ts_headline returns the
 // document — somebody's bio, a comment, a job description — with delimiters
 // around the matches. Interpolating that into a page is an injection of user
 // content by construction, so Snippet escapes first and introduces the <mark>
-// elements afterwards, and the marker strings it asks Postgres for are chosen
-// so they cannot survive escaping as anything else. See highlight.go.
+// elements afterwards, and the marker strings it asks for are chosen so they
+// cannot survive escaping as anything else. An engine returns the matched
+// text as text; the core is the one place a template.HTML is minted. See
+// highlight.go and RawHit.
 //
-// **Results are grouped by source, never blended into one list.** ts_rank is
-// a number about one document against one query; it is not comparable across
-// documents of different shapes. A four-word product tagline and a
-// three-paragraph bio that match equally well get ranks that differ by an
-// order of magnitude, and merging them produces an ordering that looks
-// authoritative and means nothing.
+// **Results are grouped by source, never blended into one list.** A relevance
+// score is a number about one document against one query; it is not
+// comparable across documents of different shapes. A four-word product
+// tagline and a three-paragraph bio that match equally well get ranks that
+// differ by an order of magnitude, and merging them produces an ordering that
+// looks authoritative and means nothing.
 //
-// **Visibility is required, not optional.** A Table with no Visible predicate
-// is refused at construction rather than quietly searching every row. Search
-// is where a forgotten visibility rule surfaces, because it is the one read
-// path that touches every row in a table rather than the ones a person
-// navigated to.
+// **Visibility is required, not optional.** A Source with no rule is refused
+// rather than quietly searching every row, and an engine that cannot enforce
+// the rule it is given refuses the source rather than searching rows it has
+// no way to filter. Search is where a forgotten visibility rule surfaces,
+// because it is the one read path that touches every row in a table rather
+// than the ones somebody navigated to.
+//
+// The grouped API is what a search box needs:
 //
 //	profiles := search.Table{
 //	    Name: "profiles", Label: "People",
@@ -43,6 +58,21 @@
 //	}
 //
 //	results, err := search.New(db).Search(ctx, search.Query{Text: "postgres"}, profiles, launches)
+//
+// For is what everything else needs — one source, filtered, hydrated into the
+// model the application already has:
+//
+//	posts, err := search.For[*Post](engine, postsIndex, "postgres").
+//	    Where("status", "published").
+//	    Take(20).
+//	    Hydrate(search.HydratorFunc[*Post](repo.LoadByKeys)).
+//	    Get(ctx)
+//
+// This package is the standard library and nothing else. An engine needing a
+// client library lives in its own package, registered from an init and
+// reached through search/engines, the way database/sql drivers are;
+// search/provider is where the api/app dependency lives. deps_test.go asserts
+// both halves.
 package search
 
 import (
@@ -101,18 +131,34 @@ type Query struct {
 
 	// Viewer is the id passed to each table's Visible predicate as $1. Zero
 	// is the anonymous viewer, which every predicate has to handle.
-	Viewer int64
+	// Widened from int64 so that a uuid key works and a filter expression
+	// can take it as a string. The cost is that a wrong type is no longer a
+	// compile error, which validateViewer buys back by refusing it before
+	// any query runs rather than letting it surface from inside a driver.
+	//
+	// Nil is the anonymous viewer and binds SQL NULL, so a predicate like
+	// `f.follower_id = {{viewer}}` is never true for one — which is correct,
+	// and is why it must not be "fixed" to 0.
+	Viewer any
 }
 
 // perSource resolves the page size.
-func (q Query) perSource() int {
+func (q Query) perSource() int { return ClampPerSource(q.Limit) }
+
+// ClampPerSource applies DefaultPerSource and MaxPerSource.
+//
+// Exported because the core resolves the page size once, before handing a
+// SearchRequest to an engine, so that each engine does not carry its own
+// forgotten clamp. Not to be confused with ClampLimit, which bounds a
+// batch size for an import.
+func ClampPerSource(limit int) int {
 	switch {
-	case q.Limit <= 0:
+	case limit <= 0:
 		return DefaultPerSource
-	case q.Limit > MaxPerSource:
+	case limit > MaxPerSource:
 		return MaxPerSource
 	default:
-		return q.Limit
+		return limit
 	}
 }
 
@@ -121,7 +167,19 @@ type Hit struct {
 	// Source is the Table.Name it came from, so a renderer can group and
 	// label without consulting anything else.
 	Source string `json:"source"`
-	ID     int64  `json:"id"`
+	// Key is the document id as the engine knows it, and is always set.
+	//
+	// The field to use. An engine whose ids are strings — a uuid, a slug —
+	// can only fill this one, and ID is zero for every hit.
+	Key string `json:"key"`
+
+	// ID is Key parsed as an integer, or zero when it does not parse.
+	//
+	// It predates Key and keeps its type deliberately: a handler putting it
+	// into a JSON payload is putting a number there, and changing it to a
+	// string would compile everywhere and silently turn a numeric prop into
+	// a string one in whatever renders it. A new caller should use Key.
+	ID int64 `json:"id"`
 
 	Title    string `json:"title"`
 	Subtitle string `json:"subtitle"`
@@ -153,6 +211,12 @@ type Group struct {
 	// it in one, but then the count is computed over the matched set on every
 	// page of a paginated search, and the count is the half nobody scrolls.
 	Total int `json:"total"`
+
+	// Estimated reports that Total is not a count but an engine's guess,
+	// which is what every external engine returns. A page rendering an
+	// estimate as "23 results" is asserting something it was not told, so it
+	// wants "about 23" — or nothing — when this is set.
+	Estimated bool `json:"estimated"`
 
 	// More is whether Total exceeds what was returned, which is what a "see
 	// all" link should be driven by rather than by comparing numbers in a

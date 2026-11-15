@@ -20,9 +20,24 @@ import (
 // somehow contains one — they cannot be typed, but an API client could send
 // one — can produce at worst a stray <mark> or </mark>, never a tag of the
 // attacker's choosing, because escaping has already happened by then.
+// They are exported because an engine author is now the reader who needs
+// them: a backend that highlights its own matches must be configured to emit
+// exactly these two, and then Snippet works on its output unchanged. The
+// Meilisearch engine sets highlightPreTag and highlightPostTag to them.
 const (
-	startSel = "\x02"
-	stopSel  = "\x03"
+	// HighlightPreTag goes before a match.
+	HighlightPreTag = "\x02"
+
+	// HighlightPostTag goes after one.
+	HighlightPostTag = "\x03"
+)
+
+// The unexported spellings this file was written against, kept so the body
+// below reads as it did and a reviewer comparing against v0.1.0 sees no
+// change where none was intended.
+const (
+	startSel = HighlightPreTag
+	stopSel  = HighlightPostTag
 )
 
 // headlineOptions is the ts_headline configuration.
@@ -60,6 +75,12 @@ func Snippet(headline string) template.HTML {
 	// So it is dropped. The field is documented as the matched text, a
 	// caller has the subtitle for plain context, and an unhighlighted lead
 	// paragraph presented as evidence of a match is worse than no evidence.
+	//
+	// The reasoning above is about ts_headline, but the rule is not
+	// Postgres-specific and must not be reimplemented per engine: a
+	// Meilisearch hit that matched only the title comes back with an
+	// unhighlighted crop of the body, which is the same situation and wants
+	// the same answer.
 	if !strings.Contains(headline, startSel) {
 		return ""
 	}

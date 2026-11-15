@@ -199,7 +199,7 @@ func TestSearchNeedsATable(t *testing.T) {
 func TestWhatSomebodyTypedIsAlwaysBound(t *testing.T) {
 	engine := New(refusingQuerier{t})
 
-	plain, args := engine.tsquery(Query{Text: "postgres"}, "english", 1)
+	plain, args := engine.tsquery("postgres", false, "english", 1)
 	if !strings.Contains(plain, "$1") {
 		t.Fatalf("a plain query did not use a placeholder: %q", plain)
 	}
@@ -210,7 +210,7 @@ func TestWhatSomebodyTypedIsAlwaysBound(t *testing.T) {
 		t.Fatalf("the text was interpolated into the SQL: %q", plain)
 	}
 
-	prefix, prefixArgs := engine.tsquery(Query{Text: "post gres", Prefix: true}, "english", 1)
+	prefix, prefixArgs := engine.tsquery("post gres", true, "english", 1)
 	if !strings.Contains(prefix, "$1") || !strings.Contains(prefix, "$2") {
 		t.Fatalf("a prefix query did not number from $1: %q", prefix)
 	}
