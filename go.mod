@@ -4,7 +4,7 @@ go 1.27
 
 require (
 	github.com/glebarez/sqlite v1.11.0
-	github.com/lemmego/api v0.12.0
+	github.com/lemmego/api v0.13.0
 	github.com/lemmego/orm v0.2.0
 	github.com/lib/pq v1.10.9
 	github.com/spf13/cobra v1.10.2
