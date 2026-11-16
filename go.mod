@@ -4,7 +4,7 @@ go 1.27
 
 require (
 	github.com/glebarez/sqlite v1.11.0
-	github.com/lemmego/api v0.13.0
+	github.com/lemmego/api v0.14.0
 	github.com/lemmego/orm v0.2.0
 	github.com/lib/pq v1.10.9
 	github.com/spf13/cobra v1.10.2
@@ -15,20 +15,18 @@ require (
 )
 
 require (
-	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/a-h/templ v0.3.943 // indirect
 	github.com/alexedwards/scs/v2 v2.8.0 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/gertd/go-pluralize v0.2.1 // indirect
 	github.com/glebarez/go-sqlite v1.22.0 // indirect
-	github.com/go-sql-driver/mysql v1.9.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/iancoleman/strcase v0.3.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
-	github.com/lemmego/migration v0.2.0 // indirect
+	github.com/lemmego/migration v0.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect
 	github.com/puzpuzpuz/xsync/v3 v3.5.1 // indirect
