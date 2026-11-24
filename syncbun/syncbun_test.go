@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"testing"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/glebarez/go-sqlite"
 
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/sqlitedialect"
